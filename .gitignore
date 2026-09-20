@@ -128,6 +128,10 @@ dist
 # pnpm
 .pnpm-store
 
+# npm/yarn lockfiles — this project uses pnpm (pnpm-lock.yaml)
+package-lock.json
+yarn.lock
+
 # yarn v3
 .pnp.*
 .yarn/*
@@ -146,3 +150,5 @@ node_modules/
 dist/
 .DS_Store
 .mailflare/
+*.bun-build
+release/

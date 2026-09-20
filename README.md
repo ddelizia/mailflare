@@ -1,71 +1,79 @@
 # mailflare
 
-An Ink + TypeScript CLI/TUI for managing Cloudflare Email Routing setups.
+An Ink + TypeScript CLI/TUI for managing Cloudflare Email Routing and
+Cloudflare's outbound SMTP relay.
 
 ## Requirements
 
 - Node.js 20+
-- Wrangler authentication (`npx wrangler login`)
+- A Cloudflare account with the domain added as a zone
+- Wrangler authentication (`npx wrangler login`, or use `mailflare login`)
 
-Wrangler OAuth is used for Cloudflare API calls after login. A scoped API token
-can also be supplied explicitly:
+Wrangler owns the OAuth login flow; mailflare only stores the selected
+account ID locally. A scoped API token can also be supplied explicitly:
 
 ```sh
 export CLOUDFLARE_API_TOKEN=...
-npx wrangler login
 ```
 
-## Interactive TUI
+## Installation
 
-Launch without arguments to open the Ink interface:
+Download a prebuilt binary:
 
 ```sh
-npm run build
-node dist/index.js
+curl -fsSL https://raw.githubusercontent.com/ddelizia/mailflare/main/install.sh | bash
 ```
 
-From the dashboard:
+Or build from source (see [Contributing](#contributing)).
 
-- Press `l` to open Wrangler's Cloudflare login flow and refresh available
-  accounts.
-- Press `a` to select the active Cloudflare account.
-- Press `s` to enter a domain and Gmail destination and create the route.
-- Press `e` to view saved setups, `v` to refresh the Wrangler session, or `q` to
-  quit.
+## Usage
 
-Wrangler owns the OAuth credentials and opens the browser for login. Mailflare
-only stores the selected account ID in its local config.
-
-## Commands
+Run `mailflare` with no arguments to open the interactive TUI, or use it as
+a CLI:
 
 ```sh
-npm install
-npm run build
-
-# Create an inbound route and save a local setup profile
-node dist/index.js setup example.com you@gmail.com
-
-# List saved setups
-node dist/index.js list
-
-# Check routing status or restore a saved route
-node dist/index.js verify example.com
-node dist/index.js fix example.com
+mailflare login                        # Log in with Wrangler
+mailflare accounts                     # List Cloudflare accounts for the logged-in user
+mailflare accounts use <account-id>    # Set the active Cloudflare account
+mailflare route create <domain> <dest> # Create an inbound route + outbound SMTP token
+mailflare route list                   # List email routing rules for the active account
+mailflare smtp list                    # List mailflare-issued SMTP tokens
+mailflare help                         # Show this message
 ```
 
-Use `--zone-id` when a domain has more than one matching zone, and
-`--account-id` when an account must be recorded explicitly. SMTP fields can be
-saved with `--smtp-host`, `--smtp-port`, and `--smtp-username`.
+From the TUI menu you can log in, pick an account, create a route, and list
+existing routes or SMTP credentials.
 
-Setup profiles are stored in `~/.mailflare/config.json` with mode `0600`. The
-generated local API key is included in the setup output and is stored in that
-file so a future SMTP relay command can use it.
+`mailflare route create` prints the outbound SMTP credential Cloudflare
+issues for the domain (host, port, username, password). The password is
+shown once and saved to `~/.mailflare/config.json` (mode `0600`) — Cloudflare
+never returns it again.
 
 ### Scope note
 
 Cloudflare Email Routing manages inbound forwarding and destination
-verification; it is not an outbound SMTP service. Mailflare therefore creates
-the Cloudflare route and records the SMTP provider profile, but an SMTP provider
-is still required for sending mail. The generated key is a local Mailflare
-credential, not a Cloudflare API token. Keep `CLOUDFLARE_API_TOKEN` separate and
-scoped.
+verification; it is not an outbound SMTP service. Mailflare creates the
+Cloudflare route and mints an SMTP token, but the domain must also be
+onboarded for Email Sending in the Cloudflare dashboard (Compute > Email
+Service > Email Sending) — there is no API for that step yet.
+
+## Contributing
+
+This project uses [pnpm](https://pnpm.io) — not npm or yarn.
+
+```sh
+git clone git@github.com:ddelizia/mailflare.git
+cd mailflare
+pnpm install
+
+pnpm dev            # run the CLI/TUI from source with tsx
+pnpm build          # compile to dist/
+pnpm typecheck      # type-check without emitting
+```
+
+Please open an issue or pull request on GitHub. Keep changes focused and
+match the existing code style.
+
+## License
+
+MIT — see [LICENSE](LICENSE).

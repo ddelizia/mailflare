@@ -1,161 +1,110 @@
 #!/usr/bin/env node
-import { Box, render, Text, useApp, useInput, useStdout } from 'ink';
-import { randomBytes } from 'node:crypto';
-import React, { useEffect, useState } from 'react';
+import { render } from 'ink';
+import React from 'react';
 import { CloudflareClient } from './cloudflare.js';
-import { getConfigPath, loadConfig, saveActiveAccount, saveSetup } from './config.js';
-import { AccountPicker, Footer, Form, Header, Home, navItems, Panel, SetupList, Sidebar, type Screen } from './tui/components.js';
-import type { CliOptions, Setup, WranglerAccount } from './types.js';
-import { checkWrangler, getWranglerAccounts, loginWithWrangler } from './wrangler.js';
+import { getConfigPath, loadConfig, saveActiveAccount, saveRoute } from './config.js';
+import { formatSmtpLines, toEmailToken } from './smtp.js';
+import { App } from './tui.js';
+import type { Route } from './types.js';
+import { getWranglerAccounts, loginWithWrangler } from './wrangler.js';
 
-type Command = 'setup' | 'list' | 'verify' | 'fix' | 'help';
+const HELP = `mailflare — Cloudflare email routing, from your terminal.
 
-function parseArgs(args: string[]): { command: Command; values: string[]; options: CliOptions } {
-  const command = (args[0] ?? 'help') as Command;
-  const values: string[] = [];
-  const options: CliOptions = {};
-  for (let index = 1; index < args.length; index += 1) {
-    const arg = args[index];
-    if (arg === '--account-id') options.accountId = args[++index];
-    else if (arg === '--zone-id') options.zoneId = args[++index];
-    else if (arg === '--smtp-host') options.smtpHost = args[++index];
-    else if (arg === '--smtp-port') options.smtpPort = Number(args[++index]);
-    else if (arg === '--smtp-username') options.smtpUsername = args[++index];
-    else values.push(arg);
-  }
-  return { command: ['setup', 'list', 'verify', 'fix'].includes(command) ? command : 'help', values, options };
+Run "mailflare" with no arguments for the interactive TUI.
+
+Commands:
+  mailflare login                        Log in with Wrangler
+  mailflare accounts                     List Cloudflare accounts for the logged-in user
+  mailflare accounts use <account-id>    Set the active Cloudflare account
+  mailflare route create <domain> <dest> Create an inbound route + outbound SMTP token
+  mailflare route list                   List email routing rules for the active account
+  mailflare smtp list                    List mailflare-issued SMTP tokens
+  mailflare help                         Show this message`;
+
+async function requireActiveAccountId(): Promise<string> {
+  const config = await loadConfig();
+  if (!config.activeAccount) throw new Error('No active account. Run "mailflare accounts" then "mailflare accounts use <id>".');
+  return config.activeAccount.id;
 }
 
-function Tui() {
-  const { exit } = useApp();
-  const { stdout } = useStdout();
-  const [screen, setScreen] = useState<Screen>('home');
-  const [selectedScreen, setSelectedScreen] = useState<Screen>('home');
-  const [config, setConfig] = useState<{ setups: Setup[]; activeAccount?: WranglerAccount }>({ setups: [] });
-  const [accounts, setAccounts] = useState<WranglerAccount[]>([]);
-  const [cursor, setCursor] = useState(0);
-  const [status, setStatus] = useState('Loading Wrangler session...');
-  const [form, setForm] = useState({ domain: '', destination: '', field: 'domain' as 'domain' | 'destination' });
-  const [focusedPane, setFocusedPane] = useState<'sidebar' | 'content'>('sidebar');
+async function main(argv: string[]): Promise<void> {
+  const [command, sub, ...rest] = argv;
 
-  const navigate = (delta: number) => {
-    setSelectedScreen((current) => {
-      const currentIndex = navItems.findIndex((item) => item.screen === current);
-      return navItems[(currentIndex + delta + navItems.length) % navItems.length].screen;
-    });
-  };
+  if (!command) {
+    render(React.createElement(App));
+    return;
+  }
 
-  const selectScreen = (nextScreen: Screen) => {
-    if (nextScreen === 'accounts') setCursor(0);
-    if (nextScreen === 'setup') setForm({ domain: '', destination: '', field: 'domain' });
-    setSelectedScreen(nextScreen);
-    setScreen(nextScreen);
-    setFocusedPane('content');
-  };
+  if (command === 'help' || command === '--help' || command === '-h') {
+    console.log(HELP);
+    return;
+  }
 
-  const refresh = async () => {
-    setStatus('Checking Wrangler login...');
-    const nextConfig = await loadConfig();
-    setConfig(nextConfig);
-    try {
-      setAccounts(await getWranglerAccounts());
-      setStatus('Ready');
-    } catch (error) {
-      setStatus((error as Error).message);
+  if (command === 'login') {
+    await loginWithWrangler();
+    console.log('Wrangler login complete.');
+    return;
+  }
+
+  if (command === 'accounts') {
+    if (sub === 'use') {
+      const accountId = rest[0];
+      if (!accountId) throw new Error('Usage: mailflare accounts use <account-id>');
+      const account = (await getWranglerAccounts()).find((item) => item.id === accountId);
+      if (!account) throw new Error(`No Cloudflare account with id ${accountId}.`);
+      await saveActiveAccount(account);
+      console.log(`Active account set to ${account.name} (${account.id}).`);
+      return;
     }
-  };
+    const accounts = await getWranglerAccounts();
+    for (const account of accounts) console.log(`${account.id}  ${account.name}`);
+    return;
+  }
 
-  useEffect(() => { void refresh(); }, []);
-
-  const submitDomain = () => setForm((value) => ({ ...value, field: 'destination' }));
-  const submitDestination = () => void createTuiSetup(form.domain, form.destination, config.activeAccount).then((message) => { setStatus(message); setScreen('home'); setSelectedScreen('home'); setFocusedPane('sidebar'); void refresh(); }).catch((error: Error) => setStatus(`Error: ${error.message}`));
-
-  useInput((input, key) => {
-    if (key.tab) { setFocusedPane((value) => value === 'sidebar' ? 'content' : 'sidebar'); return; }
-
-    if (focusedPane === 'content' && key.escape) { setSelectedScreen(screen); setFocusedPane('sidebar'); return; }
-
-    if (focusedPane === 'content' && screen !== 'setup') {
-      if (screen === 'accounts') {
-        if (input === 'k' || key.upArrow) setCursor((value) => Math.max(0, value - 1));
-        if (input === 'j' || key.downArrow) setCursor((value) => Math.min(Math.max(0, accounts.length - 1), value + 1));
-        if (key.return && accounts[cursor]) void saveActiveAccount(accounts[cursor]).then(() => { setConfig({ ...config, activeAccount: accounts[cursor] }); setStatus(`Selected ${accounts[cursor].name}`); setScreen('home'); setFocusedPane('sidebar'); });
-      } else if (screen === 'setups' && (input === 'k' || key.upArrow || input === 'j' || key.downArrow)) {
-        setCursor((value) => input === 'k' || key.upArrow ? Math.max(0, value - 1) : Math.min(Math.max(0, config.setups.length - 1), value + 1));
+  if (command === 'route') {
+    if (sub === 'create') {
+      const [domain, destination] = rest;
+      if (!domain || !destination) throw new Error('Usage: mailflare route create <domain> <destination>');
+      const config = await loadConfig();
+      const client = new CloudflareClient();
+      const zone = await client.findZone(domain);
+      const accountId = config.activeAccount?.id ?? zone.account.id;
+      const rule = await client.createRoute(zone.id, destination);
+      const apiToken = await client.createEmailToken(accountId, domain);
+      const smtp = toEmailToken(apiToken);
+      const route: Route = { domain, destination, accountId, zoneId: zone.id, ruleId: rule.id, createdAt: new Date().toISOString(), smtp };
+      await saveRoute(route);
+      console.log(`Inbound route created: *@${domain} -> ${destination}`);
+      console.log('');
+      console.log('Outbound SMTP credential:');
+      for (const line of formatSmtpLines(smtp)) console.log(`  ${line}`);
+      console.log('');
+      console.log(`Copy the password now — Cloudflare will not show it again. Saved to ${getConfigPath()}`);
+      return;
+    }
+    if (sub === 'list') {
+      const accountId = await requireActiveAccountId();
+      const rows = await new CloudflareClient().listAllRoutes(accountId);
+      if (!rows.length) { console.log('No email routing rules found.'); return; }
+      for (const { zone, rule } of rows) {
+        console.log(`${rule.enabled ? 'ON ' : 'OFF'}  ${zone.name}  ->  ${rule.actions.flatMap((action) => action.value).join(', ')}`);
       }
       return;
     }
+    throw new Error('Usage: mailflare route <create|list>');
+  }
 
-    if (screen === 'setup') return;
+  if (command === 'smtp' && sub === 'list') {
+    const tokens = await new CloudflareClient().listEmailTokens();
+    if (!tokens.length) { console.log('No SMTP tokens issued yet.'); return; }
+    for (const token of tokens) console.log(`${token.status.padEnd(8)} ${token.name}  (username: ${token.id})`);
+    return;
+  }
 
-    if (input === 'q') { exit(); return; }
-    if (input === 'l') { void loginWithWrangler().then(refresh).catch((error: Error) => setStatus(`Login failed: ${error.message}`)); return; }
-    if (input === 'a') { selectScreen('accounts'); return; }
-    if (input === 's') { selectScreen('setup'); return; }
-    if (input === 'v') { void refresh(); return; }
-    if (input === 'e') { selectScreen('setups'); return; }
-    if (input === 'h') { selectScreen('home'); return; }
-    if (key.return) { selectScreen(selectedScreen); return; }
-    if (key.escape) { if (screen === 'home') exit(); else setScreen('home'); return; }
-    if (key.upArrow) { navigate(-1); return; }
-    if (key.downArrow) { navigate(1); return; }
-
-  });
-
-  return React.createElement(Box, { flexDirection: 'column', height: stdout.rows ?? 24, padding: 1 },
-    React.createElement(Header, { screen, account: config.activeAccount }),
-    React.createElement(Box, { flexDirection: 'row', flexGrow: 1 },
-      React.createElement(Sidebar, { screen, selectedScreen, account: config.activeAccount, isFocused: focusedPane === 'sidebar' }),
-      React.createElement(Box, { flexDirection: 'column', flexGrow: 1, paddingLeft: 2 },
-        screen === 'home' && React.createElement(Home, { config, status }),
-        screen === 'accounts' && React.createElement(Panel, { title: 'CLOUDFLARE ACCOUNTS', isFocused: focusedPane === 'content' }, React.createElement(AccountPicker, { accounts, cursor })),
-        screen === 'setup' && React.createElement(Panel, { title: 'CREATE INBOUND ROUTING', isFocused: focusedPane === 'content' }, React.createElement(Form, { form, isFocused: focusedPane === 'content', onDomainChange: (domain) => setForm((value) => ({ ...value, domain })), onDestinationChange: (destination) => setForm((value) => ({ ...value, destination })), onSubmitDomain: submitDomain, onSubmitDestination: submitDestination })),
-        screen === 'setups' && React.createElement(Panel, { title: 'SAVED ROUTES', isFocused: focusedPane === 'content' }, React.createElement(SetupList, { setups: config.setups, cursor })),
-      ),
-    ),
-    React.createElement(Footer, { focusedPane }),
-  );
+  throw new Error(`Unknown command "${command}". Run "mailflare help".`);
 }
 
-async function createTuiSetup(domain: string, destination: string, activeAccount?: WranglerAccount): Promise<string> {
-  if (!domain || !destination) throw new Error('Both domain and Gmail destination are required.');
-  const client = new CloudflareClient();
-  await checkWrangler();
-  const zone = await client.findZone(domain);
-  const route = await client.createRoute(zone.id, destination);
-  const smtp = { host: 'configure-an-smtp-provider', port: 587, username: destination, apiKey: randomBytes(24).toString('hex') };
-  await saveSetup({ domain, destination, zoneId: zone.id, accountId: activeAccount?.id ?? zone.account.id, ruleId: route.id, createdAt: new Date().toISOString(), smtp });
-  return `Created route ${domain} -> ${destination}. Profile saved at ${getConfigPath()}`;
-}
-
-async function execute(command: Command, values: string[], options: CliOptions): Promise<string[]> {
-  if (command === 'help') return ['Cloudflare email routing, from your terminal.', '', 'Run `mailflare` without arguments for the interactive TUI.', '', 'Commands:', '  mailflare setup <domain> <gmail>  Create inbound routing and an SMTP profile', '  mailflare list                     List saved email setups', '  mailflare verify <domain>           Check Cloudflare routing status', '  mailflare fix <domain>              Re-apply the saved route'];
-  if (command === 'list') { const config = await loadConfig(); return config.setups.length ? config.setups.map((setup) => `${setup.domain} -> ${setup.destination} (${setup.smtp?.host ?? 'SMTP provider not configured'})`) : ['No setups saved.']; }
-  const domain = values[0];
-  if (!domain) throw new Error(`${command} requires a domain.`);
-  const config = await loadConfig();
-  const saved = config.setups.find((setup) => setup.domain === domain);
-  const client = new CloudflareClient();
-  await checkWrangler();
-  const zone = options.zoneId ? { id: options.zoneId, account: { id: options.accountId ?? process.env.CLOUDFLARE_ACCOUNT_ID ?? '' } } : await client.findZone(domain);
-  if (command === 'verify') { const status = await client.verifyRouting(zone.id); return [`${domain}: routing ${status.enabled ? 'enabled' : 'disabled'}.`]; }
-  if (command === 'fix') { if (!saved) throw new Error(`No saved setup for ${domain}. Run setup first.`); const route = await client.createRoute(zone.id, saved.destination, saved.ruleId); return [`Route restored for ${domain}.`, `Rule: ${route.id}`]; }
-  const destination = values[1];
-  if (!destination) throw new Error('setup requires a Gmail destination.');
-  const route = await client.createRoute(zone.id, destination);
-  const smtp = { host: options.smtpHost ?? 'configure-an-smtp-provider', port: options.smtpPort ?? 587, username: options.smtpUsername ?? destination, apiKey: randomBytes(24).toString('hex') };
-  await saveSetup({ domain, destination, zoneId: zone.id, accountId: zone.account.id, ruleId: route.id, createdAt: new Date().toISOString(), smtp });
-  return [`Incoming route created: ${domain} -> ${destination}`, `SMTP profile saved: ${smtp.host}:${smtp.port}`, `Local API key: ${smtp.apiKey}`, `Config: ${getConfigPath()}`];
-}
-
-function CliApp({ command, values, options }: { command: Command; values: string[]; options: CliOptions }) {
-  const { exit } = useApp();
-  const [lines, setLines] = useState<string[]>([]);
-  const [busy, setBusy] = useState(true);
-  useInput((input, key) => { if (key.escape) exit(); });
-  useEffect(() => { void execute(command, values, options).then(setLines).catch((error: Error) => setLines([`Error: ${error.message}`])).finally(() => setBusy(false)); }, []);
-  return React.createElement(Box, { flexDirection: 'column', padding: 1 }, React.createElement(Text, { color: 'cyan', bold: true }, 'mailflare'), ...lines.map((line, index) => React.createElement(Text, { key: index, color: line.startsWith('Error:') ? 'red' : undefined }, line)), busy ? React.createElement(Text, { color: 'yellow' }, 'working...') : null);
-}
-
-const parsed = parseArgs(process.argv.slice(2));
-render(process.argv.length <= 2 ? React.createElement(Tui) : React.createElement(CliApp, parsed));
+main(process.argv.slice(2)).catch((error: Error) => {
+  console.error(`Error: ${error.message}`);
+  process.exitCode = 1;
+});

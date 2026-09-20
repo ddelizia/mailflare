@@ -1,8 +1,11 @@
 {
   "name": "mailflare",
   "version": "0.1.0",
-  "description": "Ink TUI and CLI for Cloudflare Email Routing",
+  "description": "Ink TUI and CLI for Cloudflare Email Routing and Email Sending",
+  "license": "MIT",
+  "repository": "github:ddelizia/mailflare",
   "type": "module",
+  "packageManager": "pnpm@10.33.0",
   "bin": {
     "mailflare": "dist/index.js"
   },
@@ -13,13 +16,14 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
+    "@inkjs/ui": "^2.0.0",
     "ink": "^5.1.0",
-    "react": "^18.3.1",
-    "string-width": "^8.2.2"
+    "react": "^18.3.1"
   },
   "devDependencies": {
     "@types/node": "^24.4.0",
     "@types/react": "^18.3.24",
+    "react-devtools-core": "^8.0.0",
     "tsx": "^4.20.5",
     "typescript": "^5.9.2",
     "wrangler": "^4.34.0"
