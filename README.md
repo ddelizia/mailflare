@@ -18,18 +18,18 @@ export CLOUDFLARE_API_TOKEN=...
 
 ## Installation
 
-Download a prebuilt binary. It installs to `~/.local/bin` by default, so no
-`sudo` is needed:
+Download a prebuilt binary. It installs to `~/.local/bin` by default (no
+`sudo`), verifies the binary runs, and adds that directory to your `PATH`
+(via `~/.zshrc`, `~/.bashrc`, or fish config) if it isn't there already:
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/ddelizia/mailflare/main/install.sh | bash
 ```
 
-Add `~/.local/bin` to your `PATH` if the script tells you it isn't there
-already. Set `MAILFLARE_INSTALL_DIR` to install elsewhere instead (`sudo` is
-only used if that directory isn't writable).
+Set `MAILFLARE_INSTALL_DIR` to install elsewhere instead (`sudo` is only
+used if that directory isn't writable).
 
-To remove it:
+To remove it (also undoes the `PATH` change the installer made):
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/ddelizia/mailflare/main/install.sh | bash -s -- --uninstall
