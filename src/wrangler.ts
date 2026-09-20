@@ -4,7 +4,14 @@ import { homedir } from 'node:os';
 import { join } from 'node:path';
 import type { WranglerAccount } from './types.js';
 
-const wranglerConfigPath = join(homedir(), '.wrangler', 'config', 'default.toml');
+function getXdgConfigDir(): string {
+  if (process.env.XDG_CONFIG_HOME) return process.env.XDG_CONFIG_HOME;
+  if (process.platform === 'darwin') return join(homedir(), 'Library', 'Preferences');
+  if (process.platform === 'win32') return process.env.APPDATA ?? join(homedir(), 'AppData', 'Roaming', 'xdg.config');
+  return join(homedir(), '.config');
+}
+
+const wranglerConfigPath = join(getXdgConfigDir(), '.wrangler', 'config', 'default.toml');
 
 export function runWrangler(args: string[], inherit = false): Promise<{ stdout: string; stderr: string; code: number }> {
   return new Promise((resolve) => {

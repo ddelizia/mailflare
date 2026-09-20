@@ -1,7 +1,7 @@
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
-import type { MailflareConfig, Route, WranglerAccount } from './types.js';
+import type { EmailToken, MailflareConfig, Route, WranglerAccount } from './types.js';
 
 const configDir = join(homedir(), '.mailflare');
 const configPath = join(configDir, 'config.json');
@@ -26,9 +26,32 @@ export async function saveRoute(route: Route): Promise<void> {
   await writeConfig({ ...config, routes });
 }
 
+export async function removeRoute(ruleId: string): Promise<void> {
+  const config = await loadConfig();
+  const routes = config.routes.filter((item) => item.ruleId !== ruleId);
+  await writeConfig({ ...config, routes });
+}
+
 export async function saveActiveAccount(account: WranglerAccount): Promise<void> {
   const config = await loadConfig();
   await writeConfig({ ...config, activeAccount: account });
+}
+
+export async function getSmtpToken(accountId: string): Promise<EmailToken | undefined> {
+  const config = await loadConfig();
+  return config.smtpTokens?.[accountId];
+}
+
+export async function saveSmtpToken(accountId: string, token: EmailToken): Promise<void> {
+  const config = await loadConfig();
+  await writeConfig({ ...config, smtpTokens: { ...config.smtpTokens, [accountId]: token } });
+}
+
+export async function removeSmtpToken(accountId: string): Promise<void> {
+  const config = await loadConfig();
+  const smtpTokens = { ...config.smtpTokens };
+  delete smtpTokens[accountId];
+  await writeConfig({ ...config, smtpTokens });
 }
 
 export function getConfigPath(): string {

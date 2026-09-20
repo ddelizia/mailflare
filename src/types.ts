@@ -19,10 +19,11 @@ export type Route = {
   zoneId: string;
   ruleId: string;
   createdAt: string;
-  smtp?: EmailToken;
 };
 
 export type MailflareConfig = {
   routes: Route[];
   activeAccount?: WranglerAccount;
+  // one SMTP token per account — Cloudflare's Email Sending permission is account-wide, so it covers every address.
+  smtpTokens?: Record<string, EmailToken>;
 };
