@@ -1,11 +1,30 @@
 #!/usr/bin/env bash
-# Install the latest mailflare release binary.
+# Install (or uninstall) the latest mailflare release binary.
 #   curl -fsSL https://raw.githubusercontent.com/ddelizia/mailflare/main/install.sh | bash
+#   curl -fsSL https://raw.githubusercontent.com/ddelizia/mailflare/main/install.sh | bash -s -- --uninstall
 set -euo pipefail
 
 REPO="ddelizia/mailflare"
 BIN_NAME="mailflare"
-INSTALL_DIR="${MAILFLARE_INSTALL_DIR:-/usr/local/bin}"
+INSTALL_DIR="${MAILFLARE_INSTALL_DIR:-$HOME/.local/bin}"
+
+action="install"
+if [ "${1:-}" = "--uninstall" ]; then
+  action="uninstall"
+fi
+
+target="$INSTALL_DIR/$BIN_NAME"
+
+if [ "$action" = "uninstall" ]; then
+  if [ -w "$INSTALL_DIR" ] || [ ! -e "$target" ]; then
+    rm -f "$target"
+  else
+    echo "Removing $target requires sudo..."
+    sudo rm -f "$target"
+  fi
+  echo "Removed $target"
+  exit 0
+fi
 
 os="$(uname -s)"
 arch="$(uname -m)"
@@ -32,13 +51,20 @@ echo "Downloading ${asset}..."
 curl -fsSL "$url" -o "$tmp_file"
 chmod +x "$tmp_file"
 
+mkdir -p "$INSTALL_DIR"
 if [ -w "$INSTALL_DIR" ]; then
-  mv "$tmp_file" "$INSTALL_DIR/$BIN_NAME"
+  mv "$tmp_file" "$target"
 else
   echo "Installing to $INSTALL_DIR requires sudo..."
-  sudo mv "$tmp_file" "$INSTALL_DIR/$BIN_NAME"
+  sudo mv "$tmp_file" "$target"
 fi
 trap - EXIT
 
-echo "Installed $BIN_NAME to $INSTALL_DIR/$BIN_NAME"
-echo "Run '${BIN_NAME}' to get started."
+echo "Installed $BIN_NAME to $target"
+case ":$PATH:" in
+  *":$INSTALL_DIR:"*) echo "Run '${BIN_NAME}' to get started." ;;
+  *)
+    echo "$INSTALL_DIR is not on your PATH. Add it, e.g.:"
+    echo "  echo 'export PATH=\"$INSTALL_DIR:\$PATH\"' >> ~/.zshrc"
+    ;;
+esac
